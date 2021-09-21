@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="67355b3b-b7f5-4800-be24-c640e9d3a004" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<jms:config name="JMS_Config" doc:name="JMS Config" doc:id="5a497c07-92dd-407a-b14e-bd4d35c98e4f" >
+		<jms:active-mq-connection username="admin" password="admin" >
+			<jms:factory-configuration brokerUrl="tcp://localhost:61616" />
+		</jms:active-mq-connection>
+	</jms:config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="aedf5523-40d9-4510-9af0-740ddcff0499" >
+		<db:my-sql-connection host="localhost" port="3306" user="root" database="test" />
+	</db:config>
+	<file:config name="File_Config" doc:name="File Config" doc:id="53a0cfb0-c850-4755-accb-8dd0c890541c" >
+		<file:connection workingDir="D:\files\error" />
+	</file:config>
+	<file:config name="File_Config1" doc:name="File Config" doc:id="490f7fef-335b-4185-a894-d12cd9714712" >
+		<file:connection workingDir="D:\files\processed" />
+	</file:config>
+	<flow name="active_mqFlow3" doc:id="5e5fdee1-1a99-4271-91bd-75ef78b9de07" >
+		<http:listener doc:name="Listener" doc:id="3124ac93-9ddc-4797-98d7-df06c7fa968b" config-ref="HTTP_Listener_config" path="/insert"/>
+		<ee:transform doc:name="Transform Message" doc:id="c81c817f-d1ac-4ff6-b2f7-ee56a65218ac">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+payload map(item, index) ->
+{
+	"id": item.id as Number,
+	"name": item.name,
+	"designation": item.designation
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="d1725b4a-5957-44dd-8782-394500ab8ef4" variableName="pay"/>
+		<try doc:name="Try" doc:id="2a9e343a-b0d2-4f39-8970-68e2fe460b18" >
+			<db:bulk-insert doc:name="Bulk insert" doc:id="e247bfff-a0f1-4162-b886-944318f9bbdc" config-ref="Database_Config">
+			<db:sql><![CDATA[Insert into employee (Id, Name, Designation) values (:id, :name, :designation)]]></db:sql>
+		</db:bulk-insert>
+			<error-handler >
+				<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="9a06880a-431e-4101-9217-7f6224cebf19" >
+					<file:write doc:name="Write" doc:id="39637cb3-12ec-43a3-869e-5cfd6449f1a3" config-ref="File_Config" path='#[now() as String {format: "yyyyMMddhhmm"}]'>
+						<file:content ><![CDATA[#[output application/json
+---
+vars.pay]]]></file:content>
+					</file:write>
+				</on-error-propagate>
+			</error-handler>
+		</try>
+		<file:write doc:name="Write" doc:id="3f6e2862-a719-491f-b144-80bcc75ac8b3" config-ref="File_Config1" path='#[now() as String {format: "yyyyMMddhhmm"}]'>
+			<file:content ><![CDATA[#[output application/json
+---
+vars.pay]]]></file:content>
+		</file:write>
+	</flow>
+	<flow name="active_mqFlow1" doc:id="e80e5394-4b19-4ea1-932e-714256b327f0" >
+		<jms:listener doc:name="On New Message" doc:id="19725e97-20ae-4fe1-a05e-6670505b569b" config-ref="JMS_Config" destination="data">
+			<jms:consumer-type >
+				<jms:queue-consumer />
+			</jms:consumer-type>
+			<jms:response outboundContentType="application/json" persistentDelivery="true" timeToLive="5" timeToLiveUnit="HOURS" />
+		</jms:listener>
+		<http:request method="POST" doc:name="Request" doc:id="da1e8e47-2873-4627-951e-873a000d2985" url="http://localhost:8081/insert"/>
+	</flow>
+	<flow name="active_mqFlow2" doc:id="15c8cf95-891b-478f-afd1-792206714b02" >
+		<http:listener doc:name="Listener" doc:id="5f717c3a-365d-4747-8506-6ca28abd9f6f" config-ref="HTTP_Listener_config" path="/reprocess"/>
+		<jms:consume doc:name="Consume" doc:id="ecc9baf3-fcf0-4daf-b74f-fa0ea85b5152" config-ref="JMS_Config" destination="ActiveMQ.DLQ">
+			<jms:consumer-type >
+				<jms:queue-consumer />
+			</jms:consumer-type>
+		</jms:consume>
+		<http:request method="POST" doc:name="Request" doc:id="b34d9235-13c0-4a72-80c6-c1acb1af67ca" url="http://localhost:8081/insert"/>
+	</flow>
+	<flow name="active_mqFlow" doc:id="272a60ca-63ae-497a-b0d8-f510bf8407b9" >
+		<http:listener doc:name="Listener" doc:id="042cd915-fafe-458c-af77-ba927fe12bed" config-ref="HTTP_Listener_config" path="/send"/>
+		<logger level="INFO" doc:name="Logger" doc:id="78cab8bf-1f24-4da0-954d-8eae3afe91ea" message="#[payload]"/>
+		<jms:publish doc:name="Publish" doc:id="4cda2bef-3d1e-402e-8d8f-3066329bb976" config-ref="JMS_Config" destination="data" persistentDelivery="true" timeToLive="5" timeToLiveUnit="HOURS">
+			<jms:message outboundContentType="application/json" />
+		</jms:publish>
+	</flow>
+</mule>
